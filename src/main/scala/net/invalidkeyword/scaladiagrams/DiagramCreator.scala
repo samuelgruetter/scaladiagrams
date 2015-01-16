@@ -5,37 +5,51 @@ import org.rogach.scallop._
 import java.io.OutputStream
 import java.io.OutputStreamWriter
 
-object DiagramCreator { 
-  
-  def main(args:Array[String]) = {
-    outputDot(selectNodes(args))
-  }
-  
-  def selectNodes(args : Array[String]) : Iterable[TYPE]= {
+object DiagramCreator {
+
+  def main(args: Array[String]) : Unit = {
     object Config extends ScallopConf(args) {
       val extension = opt[String]("extension", default=Some(".scala"))
       val source = opt[String]("source", default=Some("."), descr = "location of source files")
-      val linked = opt[Boolean]("linked", descr = "only output types that extend other types")
-      val parent = opt[String]("parent", descr = "only output parents of a particular class")
+      val root = opt[String]("root", required=true, descr = "only output descendants of this particular class")
     }
     
     val files = new InputFinder().files(Config.source(),Config.extension())
     val allNodes = getNodesFromFiles(files)
-    val ns = new NodeSelector(allNodes)
     
-    if(!Config.parent.isEmpty)
-      parentNodes(ns,Config.parent())
-    else if(Config.linked())
-      ns.nodesWithParentsOrChildren
-    else
-      allNodes
+    val map: Map[String, TYPE] = allNodes.map(n => (n.name, n)).toMap
+    def name2Type(name: String): List[TYPE] = map.get(name) match {
+      case Some(t) =>
+       List(t)
+      case None =>
+        Console.err.println("Warning: '" + name + "' not found")
+        List()
+    }
+    // TYPE.children should be called TYPE.parents!
+    def parentsOf(t: TYPE): Iterable[TYPE] = t.children.flatMap(rel => name2Type(rel.name))
+    
+    import scala.collection.mutable
+    val chosen = mutable.HashSet[TYPE](map(Config.root()))
+    
+    var sizeBefore = -1
+    while (chosen.size > sizeBefore) {
+      sizeBefore = chosen.size
+      for (n <- allNodes if parentsOf(n).exists(p => chosen contains p)) chosen += n
+    }
+    
+    println(textBefore)
+    for (n <- chosen; p <- parentsOf(n) if chosen contains p) {
+      println("  \"" + n.name + "\" -> \"" + p.name + "\"")
+    }
+    println(textAfter)
   }
   
-  def outputDot(nodes : Iterable[TYPE]) = {
-    println ("digraph diagram {")
-    nodes.foreach(println _)
-    println ("}")  
-  }
+  val textBefore = """digraph diagram {
+  rankdir = "LR"
+  ranksep = "1.5"
+  node [fontname = "Helvetica", shape = "box"]"""
+  
+  val textAfter = "}"
   
   def fileToString(file : File) = {scala.io.Source.fromFile(file).mkString}
   
